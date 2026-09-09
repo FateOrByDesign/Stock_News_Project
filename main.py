@@ -1,4 +1,6 @@
 import os
+from logging import lastResort
+
 import requests
 from dotenv import load_dotenv
 
@@ -13,7 +15,7 @@ STOCK_INFO_API_KEY = os.getenv("ALPHA_VANTAGE_TRADING_API")
 if not STOCK_INFO_API_KEY: raise ValueError("Couldn't load the STOCK_INFO_API_KEY from .env please check the file or add the API key")
 
 STOCK_API_PARAMS = {
-    "function" : "GLOBAL_QUOTE",
+    "function" : "TIME_SERIES_DAILY",
     "symbol" : STOCK,
     "apikey" : STOCK_INFO_API_KEY
 }
@@ -45,14 +47,27 @@ def get_stock_price_data():
     response = requests.get(STOCK_INFO_API_ENDPOINT, params=STOCK_API_PARAMS)
     response.raise_for_status()
     data = response.json()
-    change_in_percentage = float(data["Global Quote"]["10. change percent"].split("%")[0])
+    # get the last trading day and the day before that in order
+    dates_to_look_into= list(data["Time Series (Daily)"].keys())[:2]
+    stock_data = {}
+    for key in dates_to_look_into:
+        stock_data[key] = data["Time Series (Daily)"][key]
+    # from the last trading day and the day before that calculate the percentage
+    last_trading_day_closing_value = float(stock_data[dates_to_look_into[0]]['4. close'])
+    day_before_last_trading_day_closing_value = float(stock_data[dates_to_look_into[1]]['4. close'])
+    change_in_percentage = (last_trading_day_closing_value  - day_before_last_trading_day_closing_value) / day_before_last_trading_day_closing_value * 100
+    change_in_percentage = round(change_in_percentage, 3)
+    # check if the change in percentage is greater than the stock threshold
     if abs(change_in_percentage) > STOCK_FLUCTUATION_THRESHOLD:
-        return change_in_percentage
-    return "No major fluctuations"
+        return (change_in_percentage, dates_to_look_into[0], dates_to_look_into[1])
+    return None
 def main():
 
 #TODO:When STOCK price increase/decreases by 5% between yesterday and the day before yesterday then print("Get News").
-    stock_percentage = get_stock_price_data()
-    print(stock_percentage)
+    result = get_stock_price_data()
+    if result is not None:
+        change_in_percentage, last_traded_day, day_before_last_traded_day = result
+        print(change_in_percentage,last_traded_day,day_before_last_traded_day)
+
 
 main()
