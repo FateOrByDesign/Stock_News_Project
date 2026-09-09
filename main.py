@@ -1,24 +1,35 @@
 import os
-from logging import lastResort
-from symtable import Symbol
-
+from requests_cache import CachedSession
 import requests
 from dotenv import load_dotenv
 
 # load environment variables
 load_dotenv()
 
+# create a cache of the for the API requests
+session = CachedSession("api_cache", expire_after=(360*3))
+
 STOCK = "TSLA"
 COMPANY_NAME = "Tesla Inc"
 STOCK_FLUCTUATION_THRESHOLD = 3
-STOCK_INFO_API_ENDPOINT = "https://www.alphavantage.co/query"
-NEWS_API_ENDPOINT = "https://newsapi.org/v2/everything"
+
 STOCK_INFO_API_KEY = os.getenv("ALPHA_VANTAGE_TRADING_API")
 NEWS_API_KEY = os.getenv("NEWSAPI.ORG_API_KEY")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_API_KEY = os.getenv("TELEGRAM_ACCESS_TOKEN")
+
+STOCK_INFO_API_ENDPOINT = "https://www.alphavantage.co/query"
+NEWS_API_ENDPOINT = "https://newsapi.org/v2/everything"
+TELEGRAM_API_ENDPOINT = f"https://api.telegram.org/bot{TELEGRAM_API_KEY}/sendMessage"
+
+
 
 # put checks in case there is any issue with loading the env variables
 if STOCK_INFO_API_KEY is None: raise ValueError("Couldn't load the STOCK_INFO_API_KEY from .env please check the file or add the API key")
 if NEWS_API_KEY is None: raise ValueError("Couldn't load the NEWS_API_KEY from .env please check the file or add the API key")
+if TELEGRAM_CHAT_ID is None: raise ValueError("Couldn't load the TELEGRAM_CHAT_ID from .env please check the file or add the API key")
+if TELEGRAM_API_KEY is None: raise ValueError("Couldn't load the TELEGRAM_API_KEY from .env please check the file or add the API key")
+
 
 
 
@@ -51,7 +62,7 @@ def get_stock_price_data():
         "symbol": STOCK,
         "apikey": STOCK_INFO_API_KEY
     }
-    response = requests.get(STOCK_INFO_API_ENDPOINT, params=stock_api_params)
+    response = session.get(STOCK_INFO_API_ENDPOINT, params=stock_api_params)
     response.raise_for_status()
     data = response.json()
 
@@ -82,10 +93,23 @@ def get_news(last_traded_day, day_before_last_traded_day):
         "language" : "en",
 
     }
-    response = requests.get(NEWS_API_ENDPOINT, params=news_api_params)
+    response = session.get(NEWS_API_ENDPOINT, params=news_api_params)
     response.raise_for_status()
     data = response.json()
     return data["articles"][:3]
+
+def send_telegram_message(text):
+    """Send the text parameter via telegram"""
+    param = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "disable_notification": False,
+    }
+    response = requests.get(TELEGRAM_API_ENDPOINT, params=param)
+    print("Message Sent Successfully" if response.status_code == 200 else "Something Went Wrong")
+    response.raise_for_status()
+
+
 
 def main():
 
@@ -93,15 +117,13 @@ def main():
     result = get_stock_price_data()
     if result is not None:
         change_in_percentage, last_traded_day, day_before_last_traded_day = result
-        print(change_in_percentage,last_traded_day,day_before_last_traded_day)
-        print()
 
         #TODO-2:Instead of printing ("Get News"), actually get the first 3 news pieces for the COMPANY_NAME.
         news = get_news(last_traded_day,day_before_last_traded_day)
         percentage = f"{STOCK}: {"🔺" if change_in_percentage > 0 else "🔻"} {change_in_percentage} %"
-        messages = []
         for items in news:
-            messages.append(f"Headline:{items["title"]}\nBrief:{items["content"]}\nURL:{items["url"]}\n")
+            text = f"{percentage}\nHeadline:{items["title"]}\nBrief:{items["content"]}\nURL:{items["url"]}\n"
+            #TODO-3:Send a seperate message with the percentage change and each article's title and description to your phone number.
+            send_telegram_message(text)
 
-        #TODO-3:Send a seperate message with the percentage change and each article's title and description to your phone number.
 main()
