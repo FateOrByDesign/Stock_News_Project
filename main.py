@@ -1,5 +1,6 @@
 import os
 from logging import lastResort
+from symtable import Symbol
 
 import requests
 from dotenv import load_dotenv
@@ -11,14 +12,14 @@ STOCK = "TSLA"
 COMPANY_NAME = "Tesla Inc"
 STOCK_FLUCTUATION_THRESHOLD = 3
 STOCK_INFO_API_ENDPOINT = "https://www.alphavantage.co/query"
+NEWS_API_ENDPOINT = "https://newsapi.org/v2/everything"
 STOCK_INFO_API_KEY = os.getenv("ALPHA_VANTAGE_TRADING_API")
-if not STOCK_INFO_API_KEY: raise ValueError("Couldn't load the STOCK_INFO_API_KEY from .env please check the file or add the API key")
+NEWS_API_KEY = os.getenv("NEWSAPI.ORG_API_KEY")
 
-STOCK_API_PARAMS = {
-    "function" : "TIME_SERIES_DAILY",
-    "symbol" : STOCK,
-    "apikey" : STOCK_INFO_API_KEY
-}
+# put checks in case there is any issue with loading the env variables
+if STOCK_INFO_API_KEY is None: raise ValueError("Couldn't load the STOCK_INFO_API_KEY from .env please check the file or add the API key")
+if NEWS_API_KEY is None: raise ValueError("Couldn't load the NEWS_API_KEY from .env please check the file or add the API key")
+
 
 
 ## STEP 1: Use https://www.alphavantage.co
@@ -44,30 +45,63 @@ Brief: We at Insider Monkey have gone over 821 13F filings that hedge funds and 
 
 
 def get_stock_price_data():
-    response = requests.get(STOCK_INFO_API_ENDPOINT, params=STOCK_API_PARAMS)
+    """If the stock percentage cross the threshold then return the percentage and the dates that covered"""
+    stock_api_params = {
+        "function": "TIME_SERIES_DAILY",
+        "symbol": STOCK,
+        "apikey": STOCK_INFO_API_KEY
+    }
+    response = requests.get(STOCK_INFO_API_ENDPOINT, params=stock_api_params)
     response.raise_for_status()
     data = response.json()
+
     # get the last trading day and the day before that in order
     dates_to_look_into= list(data["Time Series (Daily)"].keys())[:2]
     stock_data = {}
     for key in dates_to_look_into:
         stock_data[key] = data["Time Series (Daily)"][key]
+
     # from the last trading day and the day before that calculate the percentage
     last_trading_day_closing_value = float(stock_data[dates_to_look_into[0]]['4. close'])
     day_before_last_trading_day_closing_value = float(stock_data[dates_to_look_into[1]]['4. close'])
     change_in_percentage = (last_trading_day_closing_value  - day_before_last_trading_day_closing_value) / day_before_last_trading_day_closing_value * 100
     change_in_percentage = round(change_in_percentage, 3)
+
     # check if the change in percentage is greater than the stock threshold
     if abs(change_in_percentage) > STOCK_FLUCTUATION_THRESHOLD:
         return (change_in_percentage, dates_to_look_into[0], dates_to_look_into[1])
     return None
+
+def get_news(last_traded_day, day_before_last_traded_day):
+    """Return the news data from the within the given dates"""
+    news_api_params = {
+        "apiKey": NEWS_API_KEY,
+        "q": COMPANY_NAME,
+        "from": day_before_last_traded_day,
+        "to": last_traded_day,
+        "language" : "en",
+
+    }
+    response = requests.get(NEWS_API_ENDPOINT, params=news_api_params)
+    response.raise_for_status()
+    data = response.json()
+    return data["articles"][:3]
+
 def main():
 
-#TODO:When STOCK price increase/decreases by 5% between yesterday and the day before yesterday then print("Get News").
+    #TODO-1:When STOCK price increase/decreases by 5% between yesterday and the day before yesterday then print("Get News").
     result = get_stock_price_data()
     if result is not None:
         change_in_percentage, last_traded_day, day_before_last_traded_day = result
         print(change_in_percentage,last_traded_day,day_before_last_traded_day)
+        print()
 
+        #TODO-2:Instead of printing ("Get News"), actually get the first 3 news pieces for the COMPANY_NAME.
+        news = get_news(last_traded_day,day_before_last_traded_day)
+        percentage = f"{STOCK}: {"🔺" if change_in_percentage > 0 else "🔻"} {change_in_percentage} %"
+        messages = []
+        for items in news:
+            messages.append(f"Headline:{items["title"]}\nBrief:{items["content"]}\nURL:{items["url"]}\n")
 
+        #TODO-3:Send a seperate message with the percentage change and each article's title and description to your phone number.
 main()
